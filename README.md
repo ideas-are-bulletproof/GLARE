@@ -50,16 +50,5 @@ Narrow things down anytime with `--datasets`, `--seeds`, `--methods` or `--class
 ## A couple of things worth knowing
 
 - The main cost is time — supervised GLARE runs an EM loop with an inner GNN, so rewiring takes a while (the label-free variant is ~2.7× faster).
-- GADC and GRAPHITE don't change graph structure (they work on features), so their structural metrics match the original graph. A `graphite` implementation is included but left out of the reported comparison, since adding feature nodes isn't really edge rewiring.
+- GADC and GRAPHITE don't change graph structure (they work on features), so their structural metrics match the original graph.
 
-## Citation
-
-```bibtex
-@inproceedings{glare,
-  title  = {GLARE: Graph Learning through Affinity-guided Rewiring for
-            Heterophilic Node Classification},
-  author = {Kumar, Harshit and Chakraborty, Sujan and Saha, Priyanka and
-            Kar, Pritam and Bej, Saptarshi},
-  year   = {}
-}
-```
