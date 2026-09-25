@@ -1,35 +1,3 @@
-"""
-benchmark_faithful.py
-=====================
-Faithful paper-exact implementations of four graph rewiring / classification
-methods evaluated on the same datasets and seeds as benchmark_rewiring_v15.py.
-
-Each method uses ONLY the classifier proposed in its paper:
-  • IDGL      — two-layer GCN (W1/W2 linear + message-passing), joint loss
-                 Chen et al., NeurIPS 2020, Algorithm 1
-  • GADC      — pre-computed diffusion F=S·X, then 2-layer MLP only
-                 Liu et al., ICML 2024, Algorithm 1 + Section 3.4 (Option I)
-  • LPkG      — GAE (feature-recon MSE) → kNN graph → LP → blend with GNN
-                 Park & Park, BigComp 2024, Algorithm 1
-  • GRAPHITE  — graph transformation + custom FAGCN-style self-gating GNN
-                 Qiu et al., arXiv 2025, Equations 12–16
-
-Shares with benchmark_rewiring_v15.py:
-  • Identical dataset loading functions (copy-pasted, no import dependency)
-  • Identical seeds list [42, 0, 1] by default
-  • Identical train/val/test masks (same loading logic, same fixed splits)
-
-Output:
-  faithful_results/results_faithful.jsonl   — per-seed records
-  faithful_results/summary_faithful.csv     — mean ± std per (dataset, method)
-
-Usage:
-  python benchmark_faithful.py
-  python benchmark_faithful.py --datasets Actor Squirrel-F --methods idgl gadc
-  python benchmark_faithful.py --smoke_test
-  python benchmark_faithful.py --seeds 42 0 1 --device cuda
-"""
-
 from __future__ import annotations
 
 import argparse
