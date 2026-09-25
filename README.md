@@ -1,54 +1,119 @@
-# GLARE
+# GLARE: Graph Learning through Affinity-guided REwiring
 
-Code for **GLARE: Graph Learning through Affinity-guided Rewiring for Heterophilic Node Classification.**
+Anonymous code release accompanying the submission *"GLARE: Graph Learning through Affinity-Guided Rewiring for Heterophilic Node Classification"* (under double-blind review).
 
-On heterophilic graphs, connected nodes often have *different* labels — exactly the case where message-passing GNNs struggle. GLARE tackles this by rewiring the graph before you classify. It learns which nodes actually belong together (via a self-supervised similarity encoder and a neighbourhood-affinity signal), then runs an EM-style loop that alternates between training a small GNN and re-scoring every edge under a modularity-with-homophily objective. The result is a cleaner graph plus a fused feature representation you can drop into *any* downstream classifier.
+GLARE is a classifier-agnostic rewiring method for heterophilic graphs. It alternates, in an EM-style loop, between learning node embeddings and pseudo-labels on the current graph and re-estimating the edges from them. It returns two outputs that any downstream classifier can consume:
 
-Because labels only enter in two well-defined spots, the same code runs supervised (`--label_mask_ratio 1.0`) or completely label-free (`--label_mask_ratio 0.0`).
+- a **rewired graph** `Ã`, and
+- a **node embedding** `Z` learned on that graph, fused with the input features as `X̂ = [ℓ2(X) ‖ ℓ2(Z)]`.
 
-## What's in here
+A fully unsupervised variant, **GLARE-U**, uses no labels of any split during rewiring.
 
-Four scripts, each self-contained. The model code is identical across them — only what's being measured changes.
+## Method overview
 
-- **`glare_benchmark_final.py`** — the main event. Runs GLARE with all five classifiers and reports accuracy, macro-F1 and runtime.
-- **`benchmark_others.py`** — the competing rewiring / structure-learning baselines (IDGL, GADC, LPkG, DHGR, FoSR, ComFy), each paired with the classifier its own paper recommends.
-- **`homophily_benchmark.py`** — rewires and reports homophily metrics for the original vs. rewired graph. No classifier trained.
-- **`propagation_benchmark.py`** — label-propagation dynamics and community detection (NMI / ARI / accuracy) on the rewired graphs.
+1. **Similarity encoder.** An MLP is pretrained with NT-Xent on two feature-dropout views (no labels, no edges), propagated M hops over the graph, and optionally fine-tuned on visible training labels.
+2. **Candidate pool and affinity.** Candidates are the original edges, 2-hop pairs, kNN pairs under the learned similarity, and random negatives. Each is scored by `w = λ_S · S + (1 − λ_S) · Φ`, where Φ is a neighbourhood-distribution affinity.
+3. **EM loop (T outer iterations).**
+   - *E-step:* train a weighted two-layer GraphSAGE on the current soft graph to get embeddings `H` and soft pseudo-labels.
+   - *M-step:* update per-edge logits by minimising a modularity term plus a pseudo-label homophily term, regularised by entropy, a prior anchoring the original edges, and a degree budget. The temperature is cosine-annealed.
+4. **Outputs.** Threshold the edge weights to get `Ã`, compute the two-hop embedding `Z` on `Ã`, and pass `(X̂, Ã)` to any classifier.
 
-All four rely on a small `common/` package (progress bars, resumable checkpoints, tables, plots) that needs to sit next to them.
+## Repository contents
 
-## Setup
+| File | Purpose |
+|---|---|
+| `glare_benchmark_final.py` | Main GLARE pipeline and the 5-classifier harness (GCN, GAT, GraphSAGE, H2GCN, LINKX). Controls label visibility with `--label_mask_ratio`. |
+| `glare_benchmark_final_unsupervised.py` | Same pipeline with the `--unsupervised` switch used for GLARE-U (dummy labels, empty train/val masks, last iterate kept). |
+| `glare_fusion_ablation.py` | 2×2 ablation separating the rewired graph from the embedding (original/rewired graph × `ℓ2(X)`/`X̂`), with optional random-feature and graph-free MLP controls. |
+| `benchmark_others.py` | Baselines, each with the classifier from its own paper: IDGL, DHGR, ComFy, FoSR, LPkG (plus GADC and GRAPHITE). |
+| `homophily_benchmark.py` | Structural and feature homophily of original vs. rewired graphs (edge, node, adjusted, class-insensitive, LI). |
+| `propagation_benchmark.py` | Label propagation, BFS reachability, and community detection / clustering on rewired graphs and embeddings. |
+| `tolokers_auc_benchmark.py` | ROC-AUC on Tolokers for all methods. Loads the main scripts unchanged and applies small, verified in-memory hooks to read test scores. |
 
-Python 3.9+ with PyTorch and PyTorch Geometric:
+## Requirements
+
+- Python ≥ 3.9
+- PyTorch and PyTorch Geometric
+- numpy, scipy, scikit-learn, networkx, pandas, matplotlib
 
 ```bash
-pip install torch torch_geometric
-pip install numpy scipy scikit-learn networkx pandas matplotlib
+pip install torch torch_geometric numpy scipy scikit-learn networkx pandas matplotlib
 ```
 
-The six benchmark datasets — Actor, Squirrel-F, Chameleon-F, Roman-empire, Amazon-ratings, Tolokers — download automatically on first run.
+The scripts import a small helper package, `common/` (metrics, progress, checkpointing, reporting, plotting), which must sit next to the scripts. The DHGR baseline additionally needs the official DHGR repository; place it in `./DHGR` or point to it with the `DHGR_ROOT` environment variable.
 
-## Running it
+## Datasets
 
-Every script picks up where it left off if interrupted, and there's a `--smoke_test` flag if you just want to check things work before committing to a full sweep.
+All six benchmarks are downloaded automatically through PyTorch Geometric into `./data` and use their fixed public splits:
 
+Actor, Squirrel-F, Chameleon-F (filtered versions without duplicate-node leakage), Roman-empire, Amazon-ratings, Tolokers.
+
+## Usage
+
+**GLARE (supervised, main results):**
 ```bash
-# Supervised GLARE, then the label-free version
-python glare_benchmark_final.py --label_mask_ratio 1.0 --device cuda
-python glare_benchmark_final.py --label_mask_ratio 0.0 --device cuda
+python glare_benchmark_final.py --device cuda --label_mask_ratio 1.0
+```
 
-# Baselines
+**GLARE-U (fully unsupervised rewiring):**
+```bash
+python glare_benchmark_final_unsupervised.py --device cuda --unsupervised
+```
+
+**Ablation (graph vs. embedding):** run from the same directory so cached GLARE rewirings are reused.
+```bash
+python glare_fusion_ablation.py --device cuda
+python glare_fusion_ablation.py --summarize_only   # rebuild tables only
+```
+
+**Baselines:**
+```bash
 python benchmark_others.py --device cuda
-
-# Analysis (appendix results)
-python homophily_benchmark.py --device cuda
-python propagation_benchmark.py --device cuda
+python benchmark_others.py --methods idgl dhgr --datasets Actor Squirrel-F
 ```
 
-Narrow things down anytime with `--datasets`, `--seeds`, `--methods` or `--classifiers`. Results land in each script's own folder as JSONL records, CSV tables and figures.
+**Homophily, propagation and Tolokers AUC:**
+```bash
+python homophily_benchmark.py --seeds 0 1 2 --device cuda
+python propagation_benchmark.py --device cuda
+python tolokers_auc_benchmark.py --device cuda
+```
 
-## A couple of things worth knowing
+Most scripts accept `--datasets`, `--seeds`, `--classifiers` / `--methods`, `--device` and `--smoke_test` for a quick sanity run. GLARE hyperparameters are exposed as `--glare_*` / `--glare18_*` flags; defaults match the paper (see `--help`).
 
-- The main cost is time — supervised GLARE runs an EM loop with an inner GNN, so rewiring takes a while (the label-free variant is ~2.7× faster).
-- GADC and GRAPHITE don't change graph structure (they work on features), so their structural metrics match the original graph.
+## Outputs and resuming
 
+Each run appends one record to a JSONL file, so an interrupted sweep resumes where it stopped. GLARE rewirings are cached per (dataset, seed) and shared across classifiers and the ablation.
+
+| Script | Output folder |
+|---|---|
+| GLARE / GLARE-U | `glare_benchmark_results/` (checkpoints in `checkpoints/`) |
+| Ablation | `glare_fusion_ablation_results/` |
+| Baselines | `others_benchmark_results/` |
+| Homophily | `homophily_results/` |
+| Propagation | `others_benchmark_results_propagation/` |
+| Tolokers AUC | `tolokers_auc_results/` |
+
+Tables (CSV/Markdown) and figures are regenerated at the end of each run.
+
+## Main results
+
+Mean test accuracy over the five downstream classifiers (3 seeds):
+
+| Graph | Actor | Squirrel-F | Chameleon-F | Roman-emp. | Amazon-rat. | Tolokers | Mean |
+|---|---|---|---|---|---|---|---|
+| Original, ℓ2(X) | 0.315 | 0.334 | 0.463 | 0.701 | 0.484 | 0.788 | 0.514 |
+| GLARE | 0.351 | 0.507 | 0.643 | 0.657 | 0.482 | 0.795 | 0.573 |
+| GLARE-U (no labels) | 0.319 | 0.505 | 0.637 | 0.656 | 0.459 | 0.793 | 0.562 |
+
+GLARE improves accuracy in 23 of 30 classifier–dataset combinations (mean +5.8 points) and reduces the spread across classifiers roughly fourfold. It does not help on Roman-empire and parts of Amazon-ratings, where the original graph combined with the GLARE embedding is the better choice. See the paper for full tables, baselines and ablations.
+
+## Reproducibility notes
+
+- Seeds `{0, 1, 2}`, fixed public splits, results reported as mean ± std.
+- Downstream classifiers share one harness: hidden size 128, dropout 0.5, label smoothing 0.1, cosine-annealed Adam, gradient clipping, 300 epochs, validation-based model selection every 5 epochs.
+- GLARE-U never reads a label of any split during rewiring; an assertion in the code enforces this. Only the downstream classifiers use training labels.
+
+## License and citation
+
+Code is released for review purposes. License and citation information will be added after the review period.
